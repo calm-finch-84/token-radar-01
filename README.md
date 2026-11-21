@@ -6,6 +6,10 @@
 
 **Token Radar** ranks protocols that record no token yet by what their token launch would be worth, and gives each one a concrete farm plan. It reads the sealed DefiLlama snapshot (758 protocols, 40 on the watchlist), values every pre-token protocol with a category-peer model derived from the snapshot's own live-token protocols, and renders a static dashboard: a sortable, filterable board, a detail view per protocol with the model's working shown, and the live-token protocols set aside with their real market caps.
 
+## The radar-2 model
+
+Implied value = TVL × category peer multiple × 7-day growth multiplier × maturity multiplier. The model winsorizes each live-token protocol's market-cap/TVL ratio to [0.02, 3], then weights the category median by its sample size against eight parts of the global median. Every protocol is scored by the same function, and no name is special-cased.
+
 Run it with Node 22.18 or later (standard library only, no network):
 
 ```

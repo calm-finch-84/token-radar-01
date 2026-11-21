@@ -7,8 +7,9 @@
 // the ranked board.
 //
 // radar-2 uses medians of live peers' market-cap/TVL in the same category, winsorized
-// and shrunk toward the global median by sample size. The rounded peer multiple multiplies
-// TVL, growth and maturity to give implied value. No protocol name is ever special-cased.
+// and shrunk by weighting the category median by its sample size against eight parts of the
+// global median. The rounded peer multiple multiplies TVL, growth and maturity to give implied
+// value. No protocol name is ever special-cased.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -50,7 +51,7 @@ export interface ModelConstants {
 }
 
 export const MODEL: ModelConstants = {
-  peer_shrink_k: 4,
+  peer_shrink_k: 8,
   ratio_floor: 0.02,
   ratio_cap: 3,
   multiple_floor: 0.03,
