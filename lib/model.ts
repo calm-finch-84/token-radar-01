@@ -79,6 +79,7 @@ export interface RadarRow {
   maturity_multiplier: number;
   confidence: number;
   why: string[];
+  farm_steps: string[];
 }
 export interface LiveRow {
   slug: string;
@@ -337,6 +338,7 @@ export function radarRow(row: BoardRow): RadarRow {
     peer_multiple: row.model.peer_multiple, peer_sample: row.model.peer_sample,
     growth_multiplier: row.model.growth_multiplier, maturity_multiplier: row.model.maturity_multiplier,
     confidence: row.model.confidence, why: [...row.why],
+    farm_steps: [...row.farm_steps],
   };
 }
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {

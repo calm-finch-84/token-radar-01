@@ -1,16 +1,64 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar | radar-2 protocol board</title>
-<link rel="stylesheet" href="app.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Token Radar · Before the launch</title>
+  <link rel="stylesheet" href="app.css">
+  <script defer src="../data.js"></script>
+  <script defer src="app.js"></script>
 </head>
 <body>
-<a class="skip" href="#board">Skip to the board</a>
-<main id="board" tabindex="-1" aria-busy="true"></main>
-<noscript>This dashboard needs JavaScript to display the local snapshot.</noscript>
-<script src="../data.js"></script>
-<script src="app.js"></script>
+<a class="skip" href="#board">Skip to ranked protocols</a>
+<header class="masthead">
+  <a class="brand" href="#board"><span class="radar-mark" aria-hidden="true"></span>TOKEN RADAR<span class="edition">FIELD NOTES / 03</span></a>
+  <nav aria-label="Sections"><a href="#board">Discover</a><a href="#method">Model</a><a href="#live">Live tokens</a></nav>
+</header>
+<main>
+  <section class="intro">
+    <div><p class="eyebrow"><span class="signal"></span>SEALED SNAPSHOT · <span id="as-of">—</span></p>
+    <h1>Before the launch.<br><span>Follow the fundamentals.</span></h1>
+    <p class="lede">A category-peer lens on protocols without a recorded token. Compare implied launch values, inspect the evidence, and build an activity plan.</p></div>
+    <aside class="snapshot-card"><span class="eyebrow">OBSERVATION WINDOW</span><strong id="universe">—</strong><p>pre-token protocols on the radar</p><div id="coverage">Reading local snapshot…</div></aside>
+  </section>
+  <section class="metrics" aria-label="Snapshot statistics" id="metrics"></section>
+  <section id="board" class="board-section">
+    <div class="section-heading"><div><p class="eyebrow">01 / DISCOVERY</p><h2>Pre-token board</h2></div><p id="visible" role="status" aria-live="polite"></p></div>
+    <div class="filters" aria-label="Board filters">
+      <label class="search-label">Find a protocol<input id="search" type="search" placeholder="Name, ticker-free idea, or slug" autocomplete="off"></label>
+      <label>Category<select id="category"><option value="">All categories</option></select></label>
+      <label>Chain<select id="chain"><option value="">All chains</option></select></label>
+      <label>Minimum TVL<select id="minimum"><option value="0">Any size</option><option value="1000000">$1 million</option><option value="10000000">$10 million</option><option value="50000000">$50 million</option><option value="100000000">$100 million</option><option value="1000000000">$1 billion</option></select></label>
+      <label class="toggle"><input id="watchlist" type="checkbox">Watchlist only</label>
+      <button id="reset" class="quiet" type="button">Reset</button>
+    </div>
+    <p class="table-note">Select a row for the valuation and its exact farm plan. Confidence measures input coverage. <span class="warning-dot">!</span> flags a rounded-factor recomputation difference.</p>
+    <div class="table-scroll"><table id="ranked-table">
+      <caption class="sr-only">Pre-token protocols ranked by implied value. Activate headers to sort.</caption>
+      <thead><tr>
+        <th scope="col" aria-sort="ascending"><button data-sort="rank">Rank</button></th>
+        <th scope="col"><button data-sort="name">Protocol</button></th>
+        <th scope="col"><button data-sort="category">Category</button></th>
+        <th scope="col">Chains</th>
+        <th scope="col" class="number"><button data-sort="tvl_usd">TVL</button></th>
+        <th scope="col" class="number"><button data-sort="change_7d">7d change</button></th>
+        <th scope="col" class="number"><button data-sort="peer_multiple">Peer · sample</button></th>
+        <th scope="col" class="number"><button data-sort="implied_value_usd">Implied value</button></th>
+        <th scope="col" class="number"><button data-sort="confidence">Confidence</button></th>
+      </tr></thead><tbody id="board-rows"></tbody>
+    </table></div>
+    <p id="empty" hidden>No protocols match these filters. Reset to return to the full board.</p>
+    <p id="check-summary" class="footnote"></p>
+  </section>
+  <section id="method" class="model-section">
+    <div class="model-copy"><p class="eyebrow">02 / THE INSTRUMENT</p><h2>A model you can inspect.</h2><p id="model-version"></p><p>Implied value is total value locked multiplied by the category peer multiple, the weekly growth multiplier, and the maturity multiplier.</p><p id="model-rules"></p><p id="confidence-rule"></p><p class="muted">These are scenario estimates, not token-launch predictions or promised rewards. Farm plans are activity budgets, not eligibility guarantees.</p></div>
+    <div class="peer-panel"><div class="section-heading"><h3>Category calibration</h3><span id="global-peer" class="pill"></span></div><div class="peer-scroll"><table><thead><tr><th scope="col">Category</th><th scope="col" class="number">Peers</th><th scope="col" class="number">Multiple</th></tr></thead><tbody id="peer-rows"></tbody></table></div></div>
+  </section>
+  <section id="live" class="live-section"><div class="section-heading"><div><p class="eyebrow">03 / ALREADY TRADING</p><h2>Live-token reference set</h2></div><span class="pill">Market caps, not estimates</span></div><p class="muted">These protocols record a token in the snapshot and are excluded from the ranked board. Values below are their reported market caps.</p><div id="live-cards" class="live-grid"></div></section>
+</main>
+<footer><span>TOKEN RADAR / LOCAL RESEARCH DESK</span><span id="source"></span></footer>
+<dialog id="detail" aria-labelledby="detail-title"><div class="dialog-top"><span class="eyebrow">PROTOCOL DOSSIER</span><button id="close-detail" type="button" aria-label="Close protocol detail">Close ×</button></div><div id="detail-content"></div></dialog>
+<noscript>Enable JavaScript to inspect the bundled snapshot. All assets are local.</noscript>
 </body>
 </html>
