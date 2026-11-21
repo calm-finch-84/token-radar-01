@@ -137,3 +137,32 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* The ranking and its peer reference share the same table rhythm. */
+:root { --warm: #f8f7f2; }
+.board-panel thead { border-top: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.board-panel thead th, .peer-table thead th { background: var(--warm); }
+.board-panel caption { text-align: left; padding: var(--step-2) var(--step-3); }
+.board-panel tbody tr:hover { background: var(--canvas); }
+.peer-cell { white-space: nowrap; }
+.peer-sample { display: block; margin-top: var(--step-1); }
+.field #chain { min-width: 150px; max-width: 220px; }
+.field #min-tvl { min-width: 108px; }
+.field select:hover { border-color: var(--muted); }
+.formula {
+  padding: var(--step-2) var(--step-3);
+  background: var(--warm);
+  color: var(--ink);
+  border-radius: var(--radius-control);
+}
+.peer-table {
+  width: min(100%, 560px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+.peer-table th, .peer-table td { padding: var(--step-2) var(--step-3); }
+.peer-table tbody th { color: var(--ink); font-size: inherit; white-space: normal; }
+.peer-table tbody tr { cursor: default; }
+.peer-table tbody tr:last-child > * { border-bottom: 0; }
+.peer-table thead th:not(:first-child), .peer-table td { text-align: right; }
+.equation .peer-note { margin-top: 0; font-family: var(--font-body); }
