@@ -6,16 +6,9 @@
 // snapshot's live-token protocols are kept apart and shown as the market's own values, never mixed into
 // the ranked board.
 //
-// Implied value follows only from the snapshot's own figures:
-//
-//   base       = tvl_usd x BASE_MULTIPLE
-//   growth     = clamp(change_7d, -60, 120) per cent
-//   growthMult = 1 + (growth / 100) x GROWTH_WEIGHT
-//   maturity   = 0.6 + min(age_days, 1095) / 1095 x 0.4   (age_days unknown: 365)
-//   implied    = max(1, round(base x growthMult x maturity))
-//
-// The constants are the house model's, stated in the dashboard and changeable in the model sandbox. No
-// protocol name is ever special-cased: the same function scores every row.
+// radar-2 uses medians of live peers' market-cap/TVL in the same category, winsorized
+// and shrunk toward the global median by sample size. The rounded peer multiple multiplies
+// TVL, growth and maturity to give implied value. No protocol name is ever special-cased.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -42,7 +35,11 @@ export interface Snapshot {
 
 /** The model's constants, as the dashboard states them and the sandbox may change them. */
 export interface ModelConstants {
-  base_multiple: number;
+  peer_shrink_k: number;
+  ratio_floor: number;
+  ratio_cap: number;
+  multiple_floor: number;
+  multiple_cap: number;
   growth_weight: number;
   growth_floor: number;
   growth_cap: number;
@@ -53,7 +50,11 @@ export interface ModelConstants {
 }
 
 export const MODEL: ModelConstants = {
-  base_multiple: 0.25,
+  peer_shrink_k: 4,
+  ratio_floor: 0.02,
+  ratio_cap: 3,
+  multiple_floor: 0.03,
+  multiple_cap: 2,
   growth_weight: 0.5,
   growth_floor: -60,
   growth_cap: 120,
@@ -64,7 +65,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-1';
+export const MODEL_VERSION = 'radar-2';
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
 export const EARLY_ROWS = 160;
@@ -96,7 +97,9 @@ export interface BoardRow {
   age_days: number | null;
   implied_value_usd: number;
   model: {
-    base_multiple: number;
+    peer_multiple: number;
+    peer_sample: number;
+    global_multiple: number;
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
@@ -118,6 +121,8 @@ export interface RadarRow {
   listed_at: string | null;
   age_days: number | null;
   implied_value_usd: number;
+  peer_multiple: number;
+  peer_sample: number;
   growth_multiplier: number;
   maturity_multiplier: number;
 }
@@ -144,6 +149,8 @@ export interface RadarData {
   board_size: number;
   early_size: number;
   live_size: number;
+  global_multiple: number;
+  peer_table: { category: string; sample: number; multiple: number }[];
   rows: RadarRow[];
   live: LiveRow[];
 }
@@ -172,15 +179,49 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
   return Math.max(0, Math.floor((a - b) / DAY_MS));
 }
 
-/** The three multipliers and the implied value one protocol gets under `model`. */
-export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): { implied: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null } {
+/** Live peer statistics; Map keys are category labels, with null kept in its own bucket. */
+export function peerMultiples(snapshot: Snapshot, model: ModelConstants = MODEL): {
+  global_multiple: number;
+  byCategory: Map<string | null, { multiple: number; raw_median: number; sample: number }>;
+} {
+  const buckets = new Map<string | null, number[]>();
+  const ratios: number[] = [];
+  for (const p of snapshot.protocols) {
+    if (!buckets.has(p.category)) buckets.set(p.category, []);
+    if (p.mcap_usd === null || p.tvl_usd <= 0) continue;
+    const ratio = Math.min(model.ratio_cap, Math.max(model.ratio_floor, p.mcap_usd / p.tvl_usd));
+    ratios.push(ratio);
+    buckets.get(p.category)!.push(ratio);
+  }
+  const median = (values: number[]): number => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+  };
+  // An empty live universe falls back to the minimum peer multiple, never NaN.
+  const global = ratios.length ? median(ratios) : model.multiple_floor;
+  const byCategory = new Map<string | null, { multiple: number; raw_median: number; sample: number }>();
+  for (const [category, values] of buckets) {
+    const sample = values.length;
+    const raw = sample ? median(values) : global;
+    const shrunk = sample ? (sample * raw + model.peer_shrink_k * global) / (sample + model.peer_shrink_k) : global;
+    byCategory.set(category, {
+      multiple: round4(Math.min(model.multiple_cap, Math.max(model.multiple_floor, shrunk))),
+      raw_median: round4(raw), sample,
+    });
+  }
+  return { global_multiple: round4(global), byCategory };
+}
+
+/** Score with a rounded peer multiple; growth and maturity retain full precision for valuation. */
+export function impliedValue(protocol: SnapshotProtocol, asOf: string, peerMultiple: number, model: ModelConstants = MODEL): { implied: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null } {
   const age = ageDays(asOf, protocol.listed_at);
   const rawGrowth = finite(protocol.change_7d, 0);
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
   const growthMult = 1 + (growthPct / 100) * model.growth_weight;
   const ageForModel = age ?? model.unknown_age_days;
   const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-  const base = protocol.tvl_usd * model.base_multiple;
+  const base = protocol.tvl_usd * round4(peerMultiple);
   const implied = Math.max(1, Math.round(base * growthMult * maturityMult));
   return { implied, growthPct, growthMult, maturityMult, age };
 }
@@ -213,6 +254,7 @@ export interface BoardSummary {
 
 /** The protocols the board ranks, strongest first, with ranks 1..n. */
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
+  const peers = peerMultiples(snapshot, model);
   const index = bySlug(snapshot.protocols);
   const chosen = new Map<string, SnapshotProtocol>();
   // The watchlist is the floor: every slug, even one the snapshot no longer carries (it cannot, but the
@@ -230,8 +272,13 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
   for (const p of early) chosen.set(p.slug, p);
 
   const scored = [...chosen.values()].map((p) => {
-    const { implied, growthPct, growthMult, maturityMult, age } = impliedValue(p, snapshot.as_of, model);
-    return { p, implied, growthPct, growthMult, maturityMult, age };
+    const bucket = peers.byCategory.get(p.category);
+    const peer = p.category === null
+      ? round4(Math.min(model.multiple_cap, Math.max(model.multiple_floor, peers.global_multiple)))
+      : bucket!.multiple;
+    const sample = p.category === null ? 0 : bucket!.sample;
+    const { implied, growthPct, growthMult, maturityMult, age } = impliedValue(p, snapshot.as_of, peer, model);
+    return { p, peer, sample, implied, growthPct, growthMult, maturityMult, age };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
   return scored.map((s, i) => ({
@@ -250,7 +297,9 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     age_days: s.age,
     implied_value_usd: s.implied,
     model: {
-      base_multiple: model.base_multiple,
+      peer_multiple: s.peer,
+      peer_sample: s.sample,
+      global_multiple: peers.global_multiple,
       growth_pct: s.growthPct,
       growth_multiplier: round4(s.growthMult),
       maturity_multiplier: round4(s.maturityMult),
@@ -291,63 +340,85 @@ function holdDaysFor(age: number | null): number {
   return 30;
 }
 
-/** The category's one action, in the words a farmer can follow. */
-function actionFor(p: SnapshotProtocol, capital: number, chain: string): string {
-  const c = (p.category ?? '').toLowerCase();
-  const name = p.name;
-  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return `Supply $${capital} of USDC to ${name} on ${chain} and keep the position open.`;
-  if (c.includes('dex') || c.includes('yield') || c.includes('leveraged farm')) return `Provide $${capital} of liquidity to ${name}'s main pool on ${chain} and keep the position open.`;
-  if (c.includes('bridge')) return `Bridge $${capital} of USDC to ${chain} through ${name} and use the bridged funds in its app.`;
-  if (c.includes('staking') || c.includes('restak')) return `Stake $${capital} of the chain's staking asset through ${name} and keep the receipt.`;
-  if (c.includes('perpetual') || c.includes('derivative')) return `Deposit $${capital} of USDC as margin on ${name} and open one small hedge.`;
-  if (c.includes('prediction')) return `Fund $${capital} and place one market position on ${name}.`;
-  if (c.includes('curator') || c.includes('allocator')) return `Deposit $${capital} into a ${name} vault on ${chain} and keep the shares.`;
-  if (c.includes('stable')) return `Mint or deposit $${capital} of the stable asset through ${name} on ${chain}.`;
-  if (c.includes('rwa')) return `Mint $${capital} of the protocol's yield asset on ${chain} and hold it.`;
-  if (c.includes('insurance')) return `Buy $${capital} of cover from ${name} on ${chain} and keep the policy.`;
-  return `Deposit $${capital} of USDC into ${name} on ${chain} and keep the position open.`;
+/** Network fee estimate for one action on the primary chain. */
+export function gasFor(chain: string): { label: string; dollars: number } {
+  const c = chain.toLowerCase();
+  if (c === 'ethereum' || c === 'bitcoin') return { label: 'about $6', dollars: 6 };
+  if (c === 'solana') return { label: 'under $0.10', dollars: 0.1 };
+  return { label: 'about $0.50', dollars: 0.5 };
 }
 
-/**
- * A protocol's farm plan: six steps, each an action with a cost and a time. The plan is derived from
- * the protocol's own record (category, chains, TVL, age), never from a hand-written list of names.
- */
+/** Seven steps selected only from the record's category, primary chain, TVL and age. */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
   const capital = capitalFor(p);
   const hold = holdDaysFor(age);
-  const action = actionFor(p, capital, chain);
+  const gas = gasFor(chain);
+  const c = (p.category ?? '').toLowerCase();
+  let main = `Deposit $${capital} of USDC into ${p.name} on ${chain}.`;
+  let follow = `Make a second deposit of $${capital * 0.2}, 20% of the first deposit, into the same position.`;
+  let weekly = 'Rebalance a small part of the deposit once each week';
+  let exit = 'Withdraw the deposits and convert the proceeds to USDC';
+  let followCapital = `$${capital * 0.2} additional capital`;
+  let followActions = 1;
+  let exitActions = 2;
+  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) {
+    main = `Supply $${capital} of USDC or supported collateral to ${p.name} on ${chain}.`;
+    follow = `Borrow $${capital * 0.1} against the supply only if the app shows a safe collateral buffer; repay it with interest a week later.`;
+    weekly = 'Repay any small outstanding borrow each week and check the collateral buffer';
+    exit = 'Repay all debt and accrued interest before withdrawing collateral, then convert proceeds to USDC';
+    followCapital = `$${capital * 0.1} borrowed, plus variable interest`;
+    followActions = 2;
+    exitActions = 3;
+  } else if (c.includes('dex')) {
+    main = `Provide $${capital} total liquidity to a supported pool on ${p.name} on ${chain}; record both assets and the pool address.`;
+    follow = `Use $${capital * 0.1} to make a swap through the pool you funded; check price impact before signing.`;
+    weekly = 'Make one small swap through the funded pool each week';
+    exit = 'Remove all liquidity, collect accrued fees and swap the returned assets back to USDC';
+    followCapital = `$${capital * 0.1} swap capital plus the displayed trading fee`;
+    exitActions = 3;
+  } else if (c.includes('bridge')) {
+    main = `Bridge $${capital} of USDC through ${p.name} to ${chain} if supported; otherwise choose a supported destination and record it.`;
+    follow = `Transact with $${capital * 0.1} on the destination chain, then bridge that small amount back; reserve gas on both chains.`;
+    weekly = 'Make one small swap on the destination chain each week';
+    exit = 'Bridge the remaining funds back, wait for finality and verify receipt on the source chain';
+    followCapital = 'existing bridged capital plus displayed bridge fees and destination gas';
+    followActions = 2;
+  } else if (c.includes('stak')) {
+    main = `Stake $${capital} of a supported staking asset through ${p.name} on ${chain} and record the receipt token.`;
+    follow = 'Open the receipt position and claim or compound its accrued rewards once the app shows rewards available.';
+    weekly = 'Claim or compound available receipt rewards once each week';
+    exit = 'Request unstaking, respect the unbonding queue, then redeem the receipt and convert proceeds to USDC';
+    followCapital = 'no additional principal';
+    exitActions = 3;
+  } else if (c.includes('yield') || c.includes('vault') || c.includes('curator') || c.includes('allocator') || c.includes('farm')) {
+    main = `Deposit $${capital} into a supported ${p.name} vault on ${chain} and record the vault shares.`;
+    follow = `Move $${capital * 0.2} of the position into a second vault after comparing assets, withdrawal terms and fees.`;
+    weekly = 'Rebalance a small part between the two vaults each week after checking withdrawal terms';
+    exit = 'Redeem shares from both vaults, wait out any withdrawal queue and convert proceeds to USDC';
+    followCapital = 'existing position capital plus displayed vault fees';
+    followActions = 2;
+    exitActions = 3;
+  } else if (c.includes('perp') || c.includes('derivative')) {
+    main = `Deposit $${capital} of USDC as margin into ${p.name} on ${chain}; keep leverage at or below 1x.`;
+    follow = `Open and close one small hedged position with at most $${capital * 0.1} notional per leg; include both legs' fees and funding in the log.`;
+    weekly = 'Rebalance the margin allocation once each week after checking funding and available collateral';
+    exit = 'Close every margin position and cancel open orders first, then withdraw the released margin to USDC';
+    followCapital = 'existing margin plus variable trading fees and funding';
+    followActions = 4;
+    exitActions = 3;
+  }
+  const fees = (actions: number): string => actions === 1
+    ? `${gas.label} of network fees per action on ${chain}`
+    : `${gas.dollars === 0.1 ? 'under' : 'about'} $${(gas.dollars * actions).toFixed(2)} for ${actions} network actions on ${chain}`;
   return [
-    {
-      text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
-      cost: 'under $3 of gas for the first transaction',
-      time: '5 minutes',
-    },
-    {
-      text: action,
-      cost: `$${capital} of capital and about $${capital >= 150 ? 8 : 4} of gas`,
-      time: '15 minutes to set up',
-    },
-    {
-      text: `Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.`,
-      cost: 'about $2 of gas a week',
-      time: '10 minutes a week',
-    },
-    {
-      text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
-      cost: `the $${capital} stays in the position`,
-      time: `${hold} days`,
-    },
-    {
-      text: `Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.`,
-      cost: 'no fee to check, and never pay to claim',
-      time: '10 minutes',
-    },
-    {
-      text: `Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.`,
-      cost: 'nothing but the log',
-      time: '5 minutes',
-    },
+    { text: `Set up a fresh wallet for ${p.name} on ${chain}, keep its seed offline and reserve gas: ${gas.label} of network fees per action.`, cost: 'wallet creation is free; reserve gas separately', time: '5 minutes' },
+    { text: main, cost: `$${capital} capital plus ${fees(1)}; check any approval or app fees`, time: '15 minutes' },
+    { text: follow, cost: `${followCapital}; ${fees(followActions)}`, time: c.includes('lend') || c.includes('cdp') || c.includes('collateral') ? '10 minutes now and 5 minutes a week later' : '15 minutes' },
+    { text: `${weekly} on ${p.name}; record the transaction and skip it if fees exceed the amount involved.`, cost: `${fees(1)} per week, plus any app fees`, time: '10 minutes per week' },
+    { text: `Keep the ${p.name} position open for at least ${hold} days so activity spans more than one snapshot; check its health each week.`, cost: `$${capital} remains exposed in the position; variable asset and protocol risk`, time: `${hold} days` },
+    { text: `Open ${p.name}'s own points or rewards page. Claim only from the link it publishes and never pay to claim.`, cost: 'free to check; never pay a claim fee or send funds to unlock rewards', time: '10 minutes' },
+    { text: `${exit}. Write the wallet, dates, amounts, fees and every transaction hash in the ${p.name} farm log.`, cost: `${fees(exitActions)} plus any displayed exit fees`, time: '15 minutes plus any withdrawal or bridge wait' },
   ];
 }
 
@@ -382,6 +453,8 @@ export function radarRow(row: BoardRow): RadarRow {
     listed_at: row.listed_at,
     age_days: row.age_days,
     implied_value_usd: row.implied_value_usd,
+    peer_multiple: row.model.peer_multiple,
+    peer_sample: row.model.peer_sample,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
   };
@@ -402,6 +475,11 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     board_size: board.length,
     early_size: early,
     live_size: live.length,
+    global_multiple: peerMultiples(snapshot, model).global_multiple,
+    peer_table: [...new Set(board.map((r) => r.category ?? 'Uncategorised'))].map((category) => {
+      const row = board.find((r) => (r.category ?? 'Uncategorised') === category)!;
+      return { category, sample: row.model.peer_sample, multiple: row.model.peer_multiple };
+    }).sort((a, b) => b.sample - a.sample || (a.category < b.category ? -1 : a.category > b.category ? 1 : 0)),
     rows: board.map(radarRow),
     live,
   };
