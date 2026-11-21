@@ -1,92 +1,127 @@
-// A working token-radar-01 entry (Node 22, standard library only).
-//
-// The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores every
-// pre-token protocol on the board with the radar-2 category-peer model in lib/model.ts, writes the
-// ranked board to /output/board.json, and
-// copies this repository's dashboard/ and screenshots/ to /output. Last, it writes /output/dossier.json,
-// the summary the judge reads, with the vendored make.fun library.
-//
-// The dashboard is a static page, no framework and no network: dashboard/index.html, dashboard/app.css
-// and dashboard/app.js read /output/data.js, which this program writes from the same board. A starting
-// point, not a winner: it covers the watchlist, states the model and gives every protocol a farm plan.
-// Change the model, the page or the plan; keep the gate's shape.
-//
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
-
+// Build one offline research bundle from one sealed protocol snapshot.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
-import { buildDossier } from './vendor/makefun-board.ts';
+import type { BoardRow, RadarData, Snapshot } from './lib/model.ts';
+import { buildDossier, DOSSIER_MAX_BYTES } from './vendor/makefun-board.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-
-/** The scorer's own caps (reference/gate.json): the text cap shapes the bytes, the rest refuse. */
-const TEXT_MAX_BYTES = 65_536;
-const SCREENSHOT_CAPS = { max: 4, max_bytes: 524_288 };
-const IMAGE_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
-
-/** --name <value> out of the arguments, or the fallback. */
-function arg(name: string, fallback: string): string {
-  const at = process.argv.indexOf(`--${name}`);
-  if (at >= 0 && at + 1 < process.argv.length) return process.argv[at + 1]!;
-  const withEquals = process.argv.find((a) => a.startsWith(`--${name}=`));
-  return withEquals === undefined ? fallback : withEquals.slice(name.length + 3);
-}
-
-const inputArg = arg('input', '/input');
-const inputFile = inputArg.endsWith('.json') ? inputArg : join(inputArg, 'snapshot.json');
-if (!existsSync(inputFile)) {
-  process.stderr.write(`token radar: no snapshot at ${inputFile}: pass --input <snapshot.json|directory> or mount the sealed /input\n`);
-  process.exit(2);
-}
-const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
-
-const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
-const { board, radar } = buildRadar(snapshot);
-const issue = boardIssue(board, snapshot);
-if (issue !== null) {
-  process.stderr.write(`token radar: the model wrote a board the gate refuses: ${issue}\n`);
-  process.exit(1);
-}
-
-mkdirSync(out, { recursive: true });
-writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
-writeFileSync(join(out, 'data.js'), dataScript(radar));
-
-/** Copy one directory's regular files into `to`, skipping names that start with a dot. */
-function copyFiles(from: string, to: string): string[] {
-  if (!existsSync(from)) return [];
-  mkdirSync(to, { recursive: true });
-  const copied: string[] = [];
-  for (const name of readdirSync(from)) {
-    if (name.startsWith('.')) continue;
-    const path = join(from, name);
-    if (!statSync(path).isFile()) continue;
-    copyFileSync(path, join(to, name));
-    copied.push(name);
-  }
-  return copied;
-}
-
-copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
-const shots = copyFiles(join(here, 'screenshots'), join(out, 'screenshots'));
-if (shots.length < 3) {
-  process.stderr.write(`token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 3, the board, a detail view and a filtered view\n`);
-  process.exit(1);
-}
-for (const name of shots) {
-  if (!IMAGE_NAME.test(name)) {
-    process.stderr.write(`token radar: screenshots/${name}: a name is letters, digits and . _ -, 1 to 128 characters\n`);
-    process.exit(1);
+const ROOT = fileURLToPath(new URL('.', import.meta.url));
+const CAPS = {
+  text_max_bytes: 65536,
+  screenshots: { max: 4, max_bytes: 524288 },
+  dashboard: { max_files: 400, max_bytes: 4194304 },
+};
+const SCREENSHOT_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
+interface Options { input: string; output: string }
+interface CopiedAssets { dashboard: string[]; screenshots: string[] }
+class RunFailure extends Error {
+  exitCode: number;
+  constructor(message: string, exitCode = 1) {
+    super(message);
+    this.exitCode = exitCode;
   }
 }
 
-// The dossier is written last: the scorer rebuilds it from this /output and compares bytes.
-writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: { max_files: 400, max_bytes: 4_194_304 } }));
+function parseArguments(args: string[], environment: NodeJS.ProcessEnv): Options {
+  function option(name: string, fallback: string): string {
+    const flag = `--${name}`;
+    const separate = args.indexOf(flag);
+    if (separate >= 0 && separate + 1 < args.length) return args[separate + 1]!;
+    const inline = args.find(value => value.startsWith(`${flag}=`));
+    return inline === undefined ? fallback : inline.slice(flag.length + 1);
+  }
+  return { input: option('input', '/input'), output: option('output', environment.MAKEFUN_OUTPUT_DIR ?? '/output') };
+}
 
-process.stdout.write(
-  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside), model ${radar.model_version}, global peer multiple ${radar.global_multiple.toFixed(4)}x\n` +
-    `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
-);
+function loadSnapshot(input: string): Snapshot {
+  const path = input.endsWith('.json') || (existsSync(input) && statSync(input).isFile())
+    ? input : join(input, 'snapshot.json');
+  if (!existsSync(path)) {
+    throw new RunFailure(`snapshot missing at ${path}; supply --input <file|directory> or mount /input/snapshot.json`, 2);
+  }
+  return parseSnapshot(readFileSync(path, 'utf8'));
+}
+
+function validateBoard(board: BoardRow[], snapshot: Snapshot): void {
+  const issue = boardIssue(board, snapshot);
+  if (issue !== null) throw new RunFailure(`board validation failed: ${issue}`);
+}
+
+function writeScoredOutput(output: string, board: BoardRow[], radar: RadarData): void {
+  mkdirSync(output, { recursive: true });
+  writeFileSync(join(output, 'board.json'), JSON.stringify({ rows: board }) + '\n');
+  writeFileSync(join(output, 'data.js'), dataScript(radar));
+}
+
+// Flat asset directories match the submission layout; hidden entries are excluded.
+function copyDirectoryFiles(source: string, destination: string): string[] {
+  if (!existsSync(source)) return [];
+  mkdirSync(destination, { recursive: true });
+  const names = readdirSync(source).filter(name => !name.startsWith('.') && statSync(join(source, name)).isFile()).sort();
+  for (const name of names) copyFileSync(join(source, name), join(destination, name));
+  return names;
+}
+
+// Check the container signature and its closing marker, without trusting extensions.
+// These checks catch empty, renamed and common truncated captures; they are not an image decoder.
+function validateScreenshot(path: string, name: string): void {
+  if (!SCREENSHOT_NAME.test(name)) throw new RunFailure(`invalid screenshot name ${name}; use 1–128 letters, digits, dots, underscores or hyphens, starting with a letter, digit or underscore`);
+  const size = statSync(path).size;
+  if (size > CAPS.screenshots.max_bytes) throw new RunFailure(`screenshot ${name} is ${size} bytes; limit is ${CAPS.screenshots.max_bytes}`);
+  const bytes = readFileSync(path);
+  const png = bytes.length >= 45
+    && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    && bytes.readUInt32BE(8) === 13 && bytes.toString('ascii', 12, 16) === 'IHDR'
+    && bytes.subarray(-12).equals(Buffer.from([0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]));
+  const jpeg = bytes.length >= 4 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
+    && bytes[bytes.length - 2] === 255 && bytes[bytes.length - 1] === 217;
+  if (!png && !jpeg) throw new RunFailure(`screenshot ${name} lacks a complete PNG or JPEG signature and end marker`);
+}
+
+function copyDashboardAndScreenshots(output: string): CopiedAssets {
+  const dashboard = copyDirectoryFiles(join(ROOT, 'dashboard'), join(output, 'dashboard'));
+  const screenshots = copyDirectoryFiles(join(ROOT, 'screenshots'), join(output, 'screenshots'));
+  if (screenshots.length < 3) throw new RunFailure(`only ${screenshots.length} screenshots supplied; provide at least 3: board, protocol detail and filtered board`);
+  if (screenshots.length > CAPS.screenshots.max) throw new RunFailure(`supplied ${screenshots.length} screenshots; limit is ${CAPS.screenshots.max}`);
+  for (const name of screenshots) validateScreenshot(join(output, 'screenshots', name), name);
+  return { dashboard, screenshots };
+}
+
+function writeDossier(output: string): number {
+  const bytes = buildDossier(output, CAPS);
+  if (bytes.byteLength > DOSSIER_MAX_BYTES) throw new RunFailure(`dossier exceeds ${DOSSIER_MAX_BYTES} bytes`);
+  const path = join(output, 'dossier.json');
+  // This is the final artifact write. Everything it describes is already in place.
+  writeFileSync(path, bytes);
+  const saved = readFileSync(path);
+  if (saved.length !== bytes.byteLength || !saved.equals(Buffer.from(bytes))) throw new RunFailure('dossier read-back differs from the generated bytes');
+  return saved.length;
+}
+
+function reportSummary(snapshot: Snapshot, board: BoardRow[], radar: RadarData, output: string, assets: CopiedAssets, dossierBytes: number): void {
+  const leader = board[0];
+  const top = leader ? `${leader.name} ($${leader.implied_value_usd.toLocaleString('en-US')})` : 'none';
+  process.stdout.write(
+    `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside), model ${radar.model_version}, global peer multiple ${radar.global_multiple.toFixed(4)}x; top row: ${top}\n` +
+    `token radar: wrote ${join(output, 'board.json')}, ${join(output, 'data.js')}, ${join(output, 'dashboard')} (${assets.dashboard.length} files), ${join(output, 'screenshots')} (${assets.screenshots.length} images), ${join(output, 'dossier.json')} (${dossierBytes} bytes; read-back verified)\n`,
+  );
+}
+
+function main(): void {
+  const options = parseArguments(process.argv.slice(2), process.env);
+  const snapshot = loadSnapshot(options.input);
+  const { board, radar } = buildRadar(snapshot);
+  validateBoard(board, snapshot);
+  writeScoredOutput(options.output, board, radar);
+  const assets = copyDashboardAndScreenshots(options.output);
+  const dossierBytes = writeDossier(options.output);
+  reportSummary(snapshot, board, radar, options.output, assets, dossierBytes);
+}
+
+try {
+  main();
+} catch (error) {
+  process.stderr.write(`token radar: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = error instanceof RunFailure ? error.exitCode : 1;
+}
