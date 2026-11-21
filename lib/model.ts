@@ -170,8 +170,8 @@ export function impliedValue(p: SnapshotProtocol, asOf: string, peerMultiple: nu
 } {
   const age = ageDays(asOf, p.listed_at);
   const growthPct = bound(p.change_7d ?? 0, model.growth_floor, model.growth_cap);
-  const growthMult = 1 + model.growth_weight * growthPct / 100;
-  const maturityMult = model.maturity_floor + model.maturity_range * bound(age ?? model.unknown_age_days, 0, model.maturity_days) / model.maturity_days;
+  const growthMult = precise(1 + model.growth_weight * growthPct / 100);
+  const maturityMult = precise(model.maturity_floor + model.maturity_range * bound(age ?? model.unknown_age_days, 0, model.maturity_days) / model.maturity_days);
   return {
     implied: Math.max(1, Math.round(p.tvl_usd * precise(peerMultiple) * growthMult * maturityMult)),
     growthPct, growthMult, maturityMult, age,
