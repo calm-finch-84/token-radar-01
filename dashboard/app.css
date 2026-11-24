@@ -456,6 +456,11 @@ td small {
   font-size: 11px
 }
 
+.thin-peer {
+  font-size: 9px;
+  margin-left: 3px
+}
+
 .value {
   color: var(--green);
   font-weight: 650;

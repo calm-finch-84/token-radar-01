@@ -118,10 +118,10 @@
       return `<tr tabindex="0" data-slug="${esc(row.slug)}" aria-label="Rank ${row.rank}: ${esc(row.name)}. Open detail." class="${okay ? '' : 'check-failed'}">
         <td class="rank">${row.rank.toString().padStart(2, '0')}</td>
         <td><strong class="protocol-name">${esc(row.name)}</strong><small>${isWatchlist(row) ? 'WATCHLIST' : 'EARLY SIGNAL'}${okay ? '' : ' · CHECK DIFFERENCE'}</small></td>
-        <td>${esc(categoryOf(row))}</td><td><span class="chains">${esc(row.chains.join(' · ') || 'Unreported')}</span></td>
+        <td>${esc(categoryOf(row))}</td><td><span class="chains">${esc(row.chains.slice(0, 3).join(' · ') || 'Unreported')}${row.chains.length > 3 ? ` · +${row.chains.length - 3} more` : ''}</span></td>
         <td class="number" title="${esc(dollars(row.tvl_usd))}">${compact(row.tvl_usd)}</td>
         <td class="number ${row.change_7d > 0 ? 'positive' : row.change_7d < 0 ? 'negative' : 'muted'}">${percent(row.change_7d)}</td>
-        <td class="number peer-value">${multiple(row.peer_multiple)} <span class="muted">· n=${row.peer_sample}</span></td>
+        <td class="number peer-value">${multiple(row.peer_multiple)} <span class="muted">· n=${row.peer_sample}</span>${row.peer_sample <= 2 ? ' <span class="thin-peer muted">thin</span>' : ''}</td>
         <td class="number value" title="${esc(dollars(row.implied_value_usd))}">${compact(row.implied_value_usd)}${okay ? '' : ' <span class="warning-dot" title="Rounded factors do not reproduce the exported value">!</span>'}</td>
         <td class="number"><span class="confidence-track" aria-hidden="true"><i style="width:${row.confidence * 100}%"></i></span>${confidence(row.confidence)}</td>
       </tr>`;
@@ -237,7 +237,7 @@
   byId('model-rules').textContent = `Live market-cap / TVL ratios are winsorized to ${model.ratio_floor}–${model.ratio_cap}x. Category medians are blended with ${model.peer_shrink_k} parts of the global median, then bounded to ${model.multiple_floor}–${model.multiple_cap}x. Weekly change is limited to ${model.growth_floor}% through ${model.growth_cap}% with weight ${model.growth_weight}. Maturity starts at ${model.maturity_floor}x and adds up to ${model.maturity_range}x over ${model.maturity_days} days; missing dates use ${model.unknown_age_days} days. Dollar collisions are resolved deterministically for a strictly descending board.`;
   byId('confidence-rule').textContent = confidenceText;
   byId('peer-rows').innerHTML = data.peer_table.map(
-    peer => `<tr><td>${esc(peer.category)}</td><td class="number">${peer.sample}</td><td class="number">${multiple(peer.multiple)}</td></tr>`
+    peer => `<tr><td>${esc(peer.category)}</td><td class="number">${peer.sample}</td><td class="number">${multiple(peer.raw_median)}</td><td class="number">${multiple(peer.multiple)}</td></tr>`
   ).join('');
   byId('live-cards').innerHTML = data.live.map(
     row => `<article class="live-card"><div><h3>${esc(row.name)}</h3><p>${esc(categoryOf(row))} · ${esc(row.chains.join(' · ') || 'Chain unreported')}</p></div><strong>${compact(row.mcap_usd)}</strong><small>REPORTED MARKET CAP</small></article>`
