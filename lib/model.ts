@@ -256,13 +256,14 @@ export function gasFor(chain: string): { label: string; dollars: number } {
 export function stepText(step: FarmStep): string {
   return `${step.text} Cost: ${step.cost}. Time: ${step.time}.`;
 }
-interface ActivityRecipe { open: string; revisit: string; monitor: string; close: string; extra: string }
+interface ActivityRecipe { open: string; revisit: string; monitor: string; hold: string; close: string; extra: string }
 function activity(category: string | null, capital: number): ActivityRecipe {
   const kind = (category ?? '').toLowerCase();
   if (/lend|cdp|collateral/.test(kind)) return {
     open: `Supply $${capital} of an accepted asset; record the collateral settings and receipt balance`,
     revisit: 'Review the supply rate and add a small amount only after checking available withdrawal liquidity',
     monitor: 'Inspect collateral health and interest rates; repay existing debt if the buffer narrows',
+    hold: 'track collateral buffers and supply/borrow rates over the interval; exit early if the buffer stays below its starting level.',
     close: 'Repay outstanding debt and interest, then redeem the supplied collateral',
     extra: 'any approval fee and variable borrowing interest',
   };
@@ -270,6 +271,7 @@ function activity(category: string | null, capital: number): ActivityRecipe {
     open: `Allocate $${capital} across both assets of a supported liquidity pool; save its address and fee tier`,
     revisit: `Quote a $${capital / 10} swap and execute it only after inspecting price impact and the minimum received`,
     monitor: 'Inspect pool balances and accumulated fees; adjust the liquidity range only when justified',
+    hold: 'compare accumulated pool fees with price drift over the interval; withdraw if fees no longer cover the drift.',
     close: 'Remove liquidity, collect fees and exchange the returned assets into the desired settlement asset',
     extra: 'pool trading fees and possible slippage',
   };
@@ -277,6 +279,7 @@ function activity(category: string | null, capital: number): ActivityRecipe {
     open: `Send $${capital} through a supported bridge route after checking the destination and quoted receipt`,
     revisit: 'Send a small portion back over the supported return route and verify both explorer receipts',
     monitor: 'Check message finality and destination balances before using any bridged funds',
+    hold: 're-verify route finality and destination liquidity during the interval before relying on the return route at exit.',
     close: 'Return the remaining balance through a supported route and confirm source-chain receipt',
     extra: 'bridge fees and gas on both networks',
   };
@@ -284,6 +287,7 @@ function activity(category: string | null, capital: number): ActivityRecipe {
     open: `Stake $${capital} of a supported asset and record the receipt-token conversion rate`,
     revisit: 'Inspect the reward balance and compound only if the claim exceeds transaction fees',
     monitor: 'Review validator exposure, receipt backing and the current unstaking queue',
+    hold: 'watch validator performance, receipt backing and the unstaking queue over the interval; start unstaking early if the queue lengthens.',
     close: 'Submit an unstaking request, wait for the queue and redeem the receipt balance',
     extra: 'staking service fees and any redemption charge',
   };
@@ -291,6 +295,7 @@ function activity(category: string | null, capital: number): ActivityRecipe {
     open: `Transfer $${capital} into the margin account; inspect contract terms before placing any order`,
     revisit: `Place and close a position of at most $${capital / 10} notional without leverage; record execution prices`,
     monitor: 'Review margin, funding and open orders; close exposure when the planned loss limit is reached',
+    hold: 'total funding paid and margin used over the interval against the planned loss limit; flatten the position if that limit nears.',
     close: 'Cancel orders, close all positions and withdraw the released margin',
     extra: 'execution fees, funding and possible trading losses',
   };
@@ -298,6 +303,7 @@ function activity(category: string | null, capital: number): ActivityRecipe {
     open: `Subscribe $${capital} to a supported vault after reading its strategy and redemption terms`,
     revisit: 'Compare share value with the initial receipt and test redemption of a small portion',
     monitor: 'Inspect vault allocation, share value and withdrawal availability each week',
+    hold: 'compare share growth with the initial receipt and watch strategy/allocation changes; redeem if share value stalls or terms change.',
     close: 'Redeem the remaining shares and collect assets after any withdrawal queue',
     extra: 'vault management, performance and redemption fees',
   };
@@ -305,6 +311,7 @@ function activity(category: string | null, capital: number): ActivityRecipe {
     open: `Use $${capital} in the smallest supported deposit workflow after reviewing the asset and withdrawal terms`,
     revisit: 'Test a partial withdrawal and confirm that the wallet received the expected asset',
     monitor: 'Compare the position balance with the initial receipt and inspect available withdrawals',
+    hold: 'compare ending terms and balance with the start; note any fee or withdrawal-term changes during the interval.',
     close: 'Withdraw the remaining position and verify the final wallet balance',
     extra: 'the application fees displayed before signing',
   };
@@ -316,12 +323,24 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const days = age === null ? 30 : age < 180 ? 60 : age < 365 ? 45 : 30;
   const recipe = activity(p.category, capital);
   const fee = `${network.label} per network action on ${chain}`;
+  const ageReview = age === null
+    ? 'Listing age unreported: probationary hold; re-check app terms at midpoint.'
+    : age < 180
+      ? 'Young protocol: re-check terms and TVL direction at midpoint before continuing.'
+      : age < 365
+        ? 'Re-check app terms once at midpoint.'
+        : 'Longer record: review at the end unless weekly checks flag a change.';
+  const growthReview = p.change_7d === null
+    ? 'Weekly TVL change unreported: judge the hold on recorded balances alone;'
+    : p.change_7d >= 0
+      ? 'Snapshot weekly TVL did not contract: watch for continued steadiness;'
+      : 'Snapshot weekly TVL contracted: review sooner if contraction deepens;';
   return [
     { text: `Prepare a wallet for ${p.name} on ${chain}; ${network.setup}. Verify the application address using its published documentation.`, cost: `wallet setup is free; reserve ${fee}`, time: '10 minutes' },
     { text: `${recipe.open} through ${p.name} on ${chain}. Save the transaction receipt.`, cost: `$${capital} principal plus ${fee}, plus ${recipe.extra}`, time: '15 minutes plus network confirmation' },
     { text: `${recipe.revisit} in ${p.name}; save the before and after balances.`, cost: `existing position capital plus ${fee}, plus ${recipe.extra}`, time: '15 minutes during the following week' },
     { text: `${recipe.monitor} in ${p.name}. Record a weekly balance check and skip unnecessary transactions.`, cost: `balance checks are free; changes incur ${fee} and application fees`, time: '10 minutes each week' },
-    { text: `Maintain the ${p.name} position for ${days} days if its risk remains acceptable; record balances at the start and end of the interval.`, cost: `$${capital} remains exposed to asset and contract losses; no extra fee for holding`, time: `${days} days with weekly reviews` },
+    { text: `Maintain the ${p.name} position for ${days} days if its risk remains acceptable; ${recipe.hold} ${ageReview} ${growthReview} record balances at the start and end of the interval.`, cost: `$${capital} remains exposed to asset and contract losses; no extra fee for holding`, time: `${days} days with weekly reviews` },
     { text: `Check ${p.name}'s published rewards documentation and save any eligibility rules; compare them with the recorded wallet activity before submitting a claim.`, cost: `reading is free; a legitimate on-chain claim may require ${fee}`, time: '10 minutes after the holding interval' },
     { text: `${recipe.close} through ${p.name}. Save receipts and reconcile principal, proceeds and all fees in a local activity log.`, cost: `budget up to three actions at ${fee}, plus ${recipe.extra}`, time: '20 minutes plus any settlement or withdrawal queue' },
   ];
