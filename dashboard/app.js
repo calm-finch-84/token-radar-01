@@ -120,7 +120,7 @@
         <td><strong class="protocol-name">${esc(row.name)}</strong><small>${isWatchlist(row) ? 'WATCHLIST' : 'EARLY SIGNAL'}${okay ? '' : ' · CHECK DIFFERENCE'}</small></td>
         <td>${esc(categoryOf(row))}</td><td><span class="chains">${esc(row.chains.slice(0, 3).join(' · ') || 'Unreported')}${row.chains.length > 3 ? ` · +${row.chains.length - 3} more` : ''}</span></td>
         <td class="number" title="${esc(dollars(row.tvl_usd))}">${compact(row.tvl_usd)}</td>
-        <td class="number ${row.change_7d > 0 ? 'positive' : row.change_7d < 0 ? 'negative' : 'muted'}">${percent(row.change_7d)}</td>
+        <td class="number ${row.change_7d > 0 ? 'positive' : row.change_7d < 0 ? 'negative' : 'muted'}">${percent(row.change_7d)}${row.change_7d !== null && (row.change_7d < data.model.growth_floor || row.change_7d > data.model.growth_cap) ? ' <span class="thin-peer muted">cap</span>' : ''}</td>
         <td class="number peer-value">${multiple(row.peer_multiple)} <span class="muted">· n=${row.peer_sample}</span>${row.peer_sample <= 2 ? ' <span class="thin-peer muted">thin</span>' : ''}</td>
         <td class="number value" title="${esc(dollars(row.implied_value_usd))}">${compact(row.implied_value_usd)}${okay ? '' : ' <span class="warning-dot" title="Rounded factors do not reproduce the exported value">!</span>'}</td>
         <td class="number"><span class="confidence-track" aria-hidden="true"><i style="width:${row.confidence * 100}%"></i></span>${confidence(row.confidence)}</td>
