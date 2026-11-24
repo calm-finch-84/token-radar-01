@@ -58,7 +58,7 @@
   let sort = { key: 'rank', direction: 1 };
   let selectedSlug = null;
   let opener = null;
-  const confidenceText = 'Confidence measures snapshot coverage, not the chance of a token launch: 50% × n/(n + 8) for category peers, plus 25% for a known listing date and 25% for reported weekly growth.';
+  const confidenceText = `Confidence measures snapshot coverage, not the chance of a token launch: 50% × n/(n + ${data.model.peer_shrink_k}) for category peers, plus 25% for a known listing date and 25% for reported weekly growth.`;
 
   function options(id, values) {
     for (const value of [...new Set(values)].sort(lexical)) {
@@ -176,16 +176,24 @@
     const exact = matches(row);
 
     byId('detail-content').innerHTML = `
+      <header class="detail-header">
+      <div>
       <p class="eyebrow">RANK ${row.rank} / ${esc(categoryOf(row))} / ${esc(row.chains.join(' · ') || 'CHAIN UNREPORTED')}</p>
       <h2 id="detail-title">${esc(row.name)}</h2>
+      </div>
       <p class="detail-value">${dollars(row.implied_value_usd)}<span>implied launch value</span></p>
+      </header>
+      <div class="detail-columns">
+      <div class="detail-evidence">
       <section class="detail-section"><h3>Valuation working</h3>
       <div class="equation"><span>${dollars(row.tvl_usd)}<small>TVL</small></span><b>×</b><span>${multiple(row.peer_multiple)}<small>Category peer</small></span><b>×</b><span>${multiple(row.growth_multiplier)}<small>Growth</small></span><b>×</b><span>${multiple(row.maturity_multiplier)}<small>Maturity</small></span><b>=</b><span>${dollars(row.implied_value_usd)}<small>Exported value</small></span></div>
       <p class="audit ${exact ? 'audit-pass' : 'audit-warning'}">${exact ? 'Recomputation matches the exported value.' : `Recomputation difference: rounded exported factors produce ${dollars(recompute(row))}; the board records ${dollars(row.implied_value_usd)}. The exported value is shown without adjustment.`}</p></section>
       <section class="detail-section"><h3>Why this estimate</h3><ul class="reasons">${row.why.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></section>
       <div class="detail-grid"><section class="detail-section"><h3>Confidence · ${confidence(row.confidence)}</h3><p>${esc(confidenceText)}</p><p class="muted">Listing: ${esc(row.listed_at ?? 'unreported')} · Weekly growth: ${percent(row.change_7d)}</p></section>
       <section class="detail-section"><h3>Peer basis</h3><dl><dt>Category</dt><dd>${esc(categoryOf(row))}</dd><dt>Live category observations</dt><dd>${row.peer_sample}</dd><dt>Category multiple</dt><dd>${multiple(row.peer_multiple)}</dd><dt>Global median</dt><dd>${multiple(data.global_multiple)}</dd></dl></section></div>
-      <section class="detail-section"><p class="eyebrow">ACTIVITY WORKBOOK</p><h3>Seven steps, straight from the board</h3><p class="muted">Costs are planning estimates. Check current application terms before acting; participation does not guarantee rewards.</p><ol class="farm-plan">${row.farm_steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol></section>`;
+      </div>
+      <section class="detail-section detail-workbook"><p class="eyebrow">ACTIVITY WORKBOOK</p><h3>Seven steps, straight from the board</h3><p class="muted">Estimated costs; check application terms before acting. Participation does not guarantee rewards.</p><ol class="farm-plan">${row.farm_steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol></section>
+      </div>`;
 
     detail.showModal();
     detail.scrollTop = 0;
