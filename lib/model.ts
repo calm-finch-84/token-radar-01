@@ -1,4 +1,4 @@
-// radar-4: reproducible category-peer estimates from a sealed snapshot.
+// radar-5: reproducible category-peer estimates from a sealed snapshot.
 export interface SnapshotProtocol {
   slug: string;
   name: string;
@@ -39,7 +39,7 @@ export const MODEL: ModelConstants = {
   maturity_floor: 0.6, maturity_range: 0.4,
   maturity_days: 1095, unknown_age_days: 365,
 };
-export const MODEL_VERSION = 'radar-4';
+export const MODEL_VERSION = 'radar-5';
 export const EARLY_ROWS = 160;
 export const LIVE_ROWS = 24;
 export interface FarmStep { text: string; cost: string; time: string }
@@ -103,7 +103,7 @@ export interface RadarData extends BoardSummary {
   model: ModelConstants;
   model_version: string;
   global_multiple: number;
-  peer_table: { category: string; sample: number; multiple: number }[];
+  peer_table: { category: string; sample: number; multiple: number; raw_median: number }[];
   rows: RadarRow[];
   live: LiveRow[];
 }
@@ -202,9 +202,14 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     if (!isPreToken(protocol)) throw new SnapshotError(`Watchlist contains a live token: ${slug}`);
     selected.set(slug, protocol);
   }
+  // Keep the watchlist plus the highest model-valued early protocols: selection follows the model, not raw TVL.
   const early = snapshot.protocols.filter(p => !selected.has(p.slug) && isRankable(p) && p.tvl_usd < snapshot.floor_usd)
-    .sort((a, b) => b.tvl_usd - a.tvl_usd || lexical(a.slug, b.slug)).slice(0, EARLY_ROWS);
-  for (const protocol of early) selected.set(protocol.slug, protocol);
+    .map(protocol => ({
+      protocol,
+      implied: impliedValue(protocol, snapshot.as_of, peers.byCategory.get(protocol.category)!.multiple, model).implied,
+    }))
+    .sort((a, b) => b.implied - a.implied || lexical(a.protocol.slug, b.protocol.slug)).slice(0, EARLY_ROWS);
+  for (const { protocol } of early) selected.set(protocol.slug, protocol);
   const rows: BoardRow[] = [...selected.values()].map(p => {
     const basis = peers.byCategory.get(p.category)!;
     const value = impliedValue(p, snapshot.as_of, basis.multiple, model);
@@ -345,16 +350,21 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
   const board = buildBoard(snapshot, model);
   const live = liveRows(snapshot);
   const watched = new Set(snapshot.watchlist);
-  const table = new Map<string | null, { category: string; sample: number; multiple: number }>();
-  for (const row of board) table.set(row.category, {
-    category: row.category ?? 'Uncategorised', sample: row.model.peer_sample, multiple: row.model.peer_multiple,
-  });
+  const peers = peerMultiples(snapshot, model);
+  const table = new Map<string | null, RadarData['peer_table'][number]>();
+  for (const row of board) {
+    const basis = peers.byCategory.get(row.category)!;
+    table.set(row.category, {
+      category: row.category ?? 'Uncategorised', sample: basis.sample,
+      multiple: basis.multiple, raw_median: basis.raw_median,
+    });
+  }
   return { board, radar: {
     as_of: snapshot.as_of, source: snapshot.source, floor_usd: snapshot.floor_usd,
     model: { ...model }, model_version: MODEL_VERSION,
     watchlist_size: snapshot.watchlist.length, board_size: board.length,
     early_size: board.filter(row => !watched.has(row.slug)).length, live_size: live.length,
-    global_multiple: peerMultiples(snapshot, model).global_multiple,
+    global_multiple: peers.global_multiple,
     peer_table: [...table.values()].sort((a, b) => b.sample - a.sample || lexical(a.category, b.category)),
     rows: board.map(radarRow), live,
   } };

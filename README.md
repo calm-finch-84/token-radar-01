@@ -9,7 +9,7 @@ It estimates a possible token-launch value using live category peers, explains t
 The bundled snapshot contains 758 protocols and a 40-protocol watchlist.
 All scoring uses the supplied records and snapshot date: no network, current clock, random scoring, package install or build step is required.
 
-## The radar-4 valuation
+## The radar-5 valuation
 
 The valuation starts with this calculation:
 
@@ -20,6 +20,7 @@ TVL × category peer multiple × growth multiplier × maturity multiplier
 - **Peer basis:** collect market-cap / TVL ratios from live-token protocols with reported market caps and positive TVL, including peers outside the displayed live set.
 - **Winsorization:** bound each ratio to 0.02–3 before calculating the global and category medians.
 - **Shrinkage:** blend the category median with the global median as `(n × category median + 24 × global median) / (n + 24)`, where `n` is the category sample size.
+- **Peer table:** each exported category entry carries its sample size, the raw median before shrinkage (`raw_median`), and the resulting shrunk and clamped multiple (`multiple`), from the same peer basis used to score board rows.
 - **Multiple limits:** clamp the blended category multiple to 0.03–2 and retain four decimal places. Categories without observations use the global basis.
 - **Growth:** clamp reported seven-day TVL change to −60% through +120%, then use `1 + 0.5 × change / 100`. Unreported growth contributes a neutral multiplier.
 - **Maturity:** start at 0.6 and add up to 0.4 over 1,095 days since listing. An unknown listing date uses 365 days; age is measured against the snapshot date.
@@ -36,7 +37,8 @@ No protocol name receives a special scoring rule.
 
 A protocol is pre-token only when `mcap_usd`, `gecko_id` and `symbol` are all null.
 Every watchlist slug must have a pre-token record and appear on the ranked board.
-The board adds up to 160 other pre-token protocols below the watchlist TVL floor, selected by descending TVL and then slug.
+The board adds up to 160 other pre-token protocols below the watchlist TVL floor, selected by descending model implied value and then slug ascending.
+Early selection uses the same category peer basis and rounded growth and maturity factors as board scoring; the watchlist is always retained before final ranking and distinct-dollar allocation.
 Those early additions exclude CEX entries and names ending in version markers.
 Live-token protocols never enter the ranking; a separate reference set carries up to 24 non-CEX protocols ordered by market cap.
 With the bundled input, the board has 200 ranked rows and the reference set has 24 live rows.
