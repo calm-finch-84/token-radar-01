@@ -9,7 +9,7 @@ It estimates a possible token-launch value using live category peers, explains t
 The bundled snapshot contains 758 protocols and a 40-protocol watchlist.
 All scoring uses the supplied records and snapshot date: no network, current clock, random scoring, package install or build step is required.
 
-## The radar-3 valuation
+## The radar-4 valuation
 
 The valuation starts with this calculation:
 
@@ -19,14 +19,16 @@ TVL × category peer multiple × growth multiplier × maturity multiplier
 
 - **Peer basis:** collect market-cap / TVL ratios from live-token protocols with reported market caps and positive TVL, including peers outside the displayed live set.
 - **Winsorization:** bound each ratio to 0.02–3 before calculating the global and category medians.
-- **Shrinkage:** blend the category median with the global median as `(n × category median + 8 × global median) / (n + 8)`, where `n` is the category sample size.
+- **Shrinkage:** blend the category median with the global median as `(n × category median + 24 × global median) / (n + 24)`, where `n` is the category sample size.
 - **Multiple limits:** clamp the blended category multiple to 0.03–2 and retain four decimal places. Categories without observations use the global basis.
 - **Growth:** clamp reported seven-day TVL change to −60% through +120%, then use `1 + 0.5 × change / 100`. Unreported growth contributes a neutral multiplier.
 - **Maturity:** start at 0.6 and add up to 0.4 over 1,095 days since listing. An unknown listing date uses 365 days; age is measured against the snapshot date.
 - **Dollar ordering:** round the estimate to whole dollars, order ties by slug, and raise colliding values from the bottom upward as needed to keep every value positive and distinct.
 
+Thin categories (n=1–2) are pulled strongly toward the global median so a single peer cannot set a category's price.
+
 Confidence describes input coverage, not the likelihood of a launch or a successful claim.
-Its score is `0.5 × n / (n + 8)`, plus 0.25 for a usable listing date and 0.25 for reported weekly growth, rounded to four decimal places.
+Its score is `0.5 × n / (n + 24)`, plus 0.25 for a usable listing date and 0.25 for reported weekly growth, rounded to four decimal places.
 Each row includes three machine-generated reasons covering its peer basis, growth direction and maturity assumption.
 No protocol name receives a special scoring rule.
 
@@ -91,7 +93,7 @@ A separate live-token section shows reported market caps rather than modeled lau
 
 The dashboard also multiplies the exported factors and rounds the result for every row.
 It visibly marks any disagreement with the exported implied value, without changing or hiding the row.
-Such differences can arise because the model retains full growth and maturity precision when scoring but exports four-decimal multipliers, or because it resolves dollar collisions.
+The model scores with the same four-decimal growth and maturity multipliers it exports; any remaining differences can arise from resolving dollar collisions.
 Farm plans vary by category, chain fee class, TVL and age; their costs are planning estimates rather than live quotes.
 Neither implied values nor activity plans promise a token launch, rewards or investment returns.
 

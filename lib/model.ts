@@ -1,4 +1,4 @@
-// radar-3: reproducible category-peer estimates from a sealed snapshot.
+// radar-4: reproducible category-peer estimates from a sealed snapshot.
 export interface SnapshotProtocol {
   slug: string;
   name: string;
@@ -33,13 +33,13 @@ export interface ModelConstants {
   unknown_age_days: number;
 }
 export const MODEL: ModelConstants = {
-  peer_shrink_k: 8, ratio_floor: 0.02, ratio_cap: 3,
+  peer_shrink_k: 24, ratio_floor: 0.02, ratio_cap: 3,
   multiple_floor: 0.03, multiple_cap: 2,
   growth_weight: 0.5, growth_floor: -60, growth_cap: 120,
   maturity_floor: 0.6, maturity_range: 0.4,
   maturity_days: 1095, unknown_age_days: 365,
 };
-export const MODEL_VERSION = 'radar-3';
+export const MODEL_VERSION = 'radar-4';
 export const EARLY_ROWS = 160;
 export const LIVE_ROWS = 24;
 export interface FarmStep { text: string; cost: string; time: string }
@@ -180,12 +180,12 @@ export function impliedValue(p: SnapshotProtocol, asOf: string, peerMultiple: nu
 
 // Confidence measures input coverage, not the probability of a token or a payout.
 // Half the score comes from peer support; date and growth coverage add a quarter each.
-function coverage(sample: number, age: number | null, growth: number | null): number {
-  return precise(bound(0.5 * sample / (sample + 8) + (age === null ? 0 : 0.25) + (growth === null ? 0 : 0.25), 0, 1));
+function coverage(sample: number, age: number | null, growth: number | null, model: ModelConstants): number {
+  return precise(bound(0.5 * sample / (sample + model.peer_shrink_k) + (age === null ? 0 : 0.25) + (growth === null ? 0 : 0.25), 0, 1));
 }
-function explanations(p: SnapshotProtocol, basis: PeerBasis, growth: number, age: number | null, model: ModelConstants): string[] {
+function explanations(p: SnapshotProtocol, basis: PeerBasis, growth: number, age: number | null, model: ModelConstants, globalMultiple: number): string[] {
   return [
-    `${basis.sample} live category peers; shrunk multiple ${basis.multiple.toFixed(4)}x TVL.`,
+    `${basis.sample} live category ${basis.sample === 1 ? 'peer' : 'peers'}; raw median ${basis.raw_median.toFixed(4)}x pulled toward the ${globalMultiple.toFixed(4)}x global median (shrinkage k=${model.peer_shrink_k}), giving ${basis.multiple.toFixed(4)}x TVL.`,
     p.change_7d === null ? 'Weekly growth unreported; neutral growth applied.'
       : `Weekly TVL ${growth > 0 ? 'expansion' : growth < 0 ? 'contraction' : 'unchanged'}: ${growth.toFixed(2)}% after limits.`,
     age === null ? `Listing date unavailable; maturity uses ${model.unknown_age_days} days.`
@@ -215,9 +215,9 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
         peer_multiple: basis.multiple, peer_sample: basis.sample, global_multiple: peers.global_multiple,
         growth_pct: value.growthPct, growth_multiplier: precise(value.growthMult),
         maturity_multiplier: precise(value.maturityMult), age_days: value.age,
-        confidence: coverage(basis.sample, value.age, p.change_7d),
+        confidence: coverage(basis.sample, value.age, p.change_7d, model),
       },
-      why: explanations(p, basis, value.growthPct, value.age, model),
+      why: explanations(p, basis, value.growthPct, value.age, model, peers.global_multiple),
       farm_steps: farmSteps(p, value.age).map(stepText),
     };
   });
